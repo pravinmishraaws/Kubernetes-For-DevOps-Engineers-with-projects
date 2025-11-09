@@ -102,7 +102,7 @@ Kubernetes **automatically replaces the deleted Pod** to maintain the desired nu
 
 ### What is Horizontal Pod Autoscaler (HPA)?
 
-A Horizontal Pod Autoscaler (HPA) is a Kubernetes **feature** that automatically adjusts the number of pods in a deployment, replica set, or stateful set to match the current workload. It works by observing resource metrics like CPU or memory usage and scaling up or down by adding or removing pods to maintain a target utilization level. This ensures your application can handle varying loads, scaling out during peak times and scaling in when traffic is low to conserve resources
+A Horizontal Pod Autoscaler (HPA) is a Kubernetes **feature** that automatically adjusts the number of pods in a deployment, replica set, or stateful set to match the current workload. 
 
 This is where Kubernetes will **scale your Pods based on CPU usage**.
 
@@ -155,11 +155,29 @@ kubectl apply -f hpa-deployment.yaml
 
 ### Step 2: Enable the autoscaler
 
+### Enable metrics-server for MiniKube
+
 You’ll need the **metrics server** running in your cluster. If not installed, follow this (for Minikube):
 
 ```bash
 minikube addons enable metrics-server
 ```
+
+### Enable metrics-server for Kind
+
+```bash
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl patch deployment metrics-server -n kube-system \
+  --type='json' -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value":"--kubelet-insecure-tls"}]'
+```
+
+#### Verify Metrics Server is running
+
+```bash
+kubectl get deployment metrics-server -n kube-system
+```
+
+Make sure the READY column shows 1/1.
 
 Now create the HPA:
 
