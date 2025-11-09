@@ -199,7 +199,7 @@ Now create the HPA:
 ## **Option 1: Imperative Command (Quick & Ad-Hoc)**
 
 ```bash
-kubectl autoscale deployment cpu-demo --cpu-percent=50 --min=1 --max=5
+kubectl autoscale deployment nginx-deployment --cpu-percent=50 --min=1 --max=5
 ```
 
 ### When to use:
@@ -215,40 +215,47 @@ kubectl autoscale deployment cpu-demo --cpu-percent=50 --min=1 --max=5
 ### Step 1: Create the YAML file
 
 ```bash
-touch hpa-cpu-demo.yaml
-vi hpa-cpu-demo.yaml
+touch hpa-nginx.yaml
+vi hpa-nginx.yaml
 ```
 
 Paste this:
 
 ```yaml
-apiVersion: autoscaling/v1
+apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: cpu-demo-hpa
+  name: nginx-hpa
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: cpu-demo
+    name: nginx-deployment
   minReplicas: 1
   maxReplicas: 5
-  targetCPUUtilizationPercentage: 50
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
 ```
 
 Apply it:
 
 ```bash
-kubectl apply -f hpa-cpu-demo.yaml
+kubectl apply -f hpa-nginx.yaml
 ```
 
 Check status:
 
 ```bash
 kubectl get hpa
-kubectl describe hpa cpu-demo-hpa
+kubectl describe nginx-hpa
 
-kubectl delete hpa cpu-demo
+kubectl delete hpa nginx-hpa
 ```
 
 ---
