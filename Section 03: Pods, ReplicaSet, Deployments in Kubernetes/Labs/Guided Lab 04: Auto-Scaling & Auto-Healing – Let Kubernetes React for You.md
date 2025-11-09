@@ -199,7 +199,7 @@ Now create the HPA:
 ## **Option 1: Imperative Command (Quick & Ad-Hoc)**
 
 ```bash
-kubectl autoscale deployment nginx-deployment --cpu-percent=50 --min=1 --max=5
+kubectl autoscale deployment nginx-deployment --cpu-percent=50 --min=2 --max=5
 ```
 
 ### When to use:
@@ -231,7 +231,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: nginx-deployment
-  minReplicas: 1
+  minReplicas: 2
   maxReplicas: 5
   metrics:
     - type: Resource
