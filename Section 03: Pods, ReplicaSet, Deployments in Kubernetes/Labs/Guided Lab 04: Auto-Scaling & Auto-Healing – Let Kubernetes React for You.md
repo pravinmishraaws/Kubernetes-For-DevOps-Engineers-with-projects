@@ -118,15 +118,23 @@ vi hpa-deployment.yaml
 Paste this:
 
 ```yaml
+# nginx-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx-deployment
+  labels:
+    app: nginx
 spec:
   replicas: 2
   selector:
     matchLabels:
       app: nginx
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
@@ -138,10 +146,10 @@ spec:
           ports:
             - containerPort: 80
           resources:
-            limits:
-              cpu: "200m"
             requests:
               cpu: "100m"
+            limits:
+              cpu: "200m"
 ```
 
 **How it works together:**
