@@ -1,4 +1,4 @@
-# Guided Lab — Kubernetes Health Probes (Readiness & Liveness)
+# Guided Lab 05 — Kubernetes Health Probes (Readiness & Liveness)
 
 ## 1) Introduction
 
