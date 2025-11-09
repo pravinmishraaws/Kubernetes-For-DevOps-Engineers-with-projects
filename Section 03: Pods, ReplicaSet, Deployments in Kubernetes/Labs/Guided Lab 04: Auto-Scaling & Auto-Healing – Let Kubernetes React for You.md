@@ -121,23 +121,22 @@ Paste this:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cpu-demo
+  name: nginx-deployment
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: cpu-demo
+      app: nginx
   template:
     metadata:
       labels:
-        app: cpu-demo
+        app: nginx
     spec:
       containers:
-        - name: cpu-stress
-          image: vish/stress
-          args:
-            - -cpus
-            - "1"
+        - name: nginx
+          image: nginx:1.21.1
+          ports:
+            - containerPort: 80
           resources:
             limits:
               cpu: "200m"
