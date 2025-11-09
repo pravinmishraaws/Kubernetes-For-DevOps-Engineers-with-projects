@@ -104,7 +104,10 @@ Kubernetes **automatically replaces the deleted Pod** to maintain the desired nu
 
 A Horizontal Pod Autoscaler (HPA) is a Kubernetes **feature** that automatically adjusts the number of pods in a deployment, replica set, or stateful set to match the current workload. 
 
-This is where Kubernetes will **scale your Pods based on CPU usage**.
+This is where Kubernetes will **scale your Pods based on CPU usage, Memory, custom/external metrics**.
+
+
+<img width="552" height="308" alt="Screenshot 2025-11-09 at 22 38 24" src="https://github.com/user-attachments/assets/a2c8edd7-b3bd-4d04-944a-550750c12c6c" />
 
 We’ll simulate it with a special image that generates CPU load.
 
