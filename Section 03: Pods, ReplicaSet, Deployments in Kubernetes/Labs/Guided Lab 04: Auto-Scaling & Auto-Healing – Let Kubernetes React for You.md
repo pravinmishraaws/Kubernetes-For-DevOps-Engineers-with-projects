@@ -112,7 +112,7 @@ We’ll simulate it with a special image that generates CPU load.
 
 ```bash
 touch hpa-deployment.yaml
-nano hpa-deployment.yaml
+vi hpa-deployment.yaml
 ```
 
 Paste this:
@@ -183,7 +183,7 @@ kubectl autoscale deployment cpu-demo --cpu-percent=50 --min=1 --max=5
 
 ```bash
 touch hpa-cpu-demo.yaml
-nano hpa-cpu-demo.yaml
+vi hpa-cpu-demo.yaml
 ```
 
 Paste this:
