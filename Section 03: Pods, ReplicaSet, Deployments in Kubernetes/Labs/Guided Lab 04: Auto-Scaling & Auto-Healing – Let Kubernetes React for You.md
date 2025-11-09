@@ -118,7 +118,6 @@ vi hpa-deployment.yaml
 Paste this:
 
 ```yaml
-# nginx-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
