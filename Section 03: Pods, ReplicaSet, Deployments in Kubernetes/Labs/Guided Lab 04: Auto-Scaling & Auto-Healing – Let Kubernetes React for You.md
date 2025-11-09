@@ -106,8 +106,8 @@ A Horizontal Pod Autoscaler (HPA) is a Kubernetes **feature** that automatically
 
 This is where Kubernetes will **scale your Pods based on CPU usage, Memory, custom/external metrics**.
 
+<img width="1833" height="993" alt="Screenshot 2025-11-09 at 23 07 27" src="https://github.com/user-attachments/assets/13eed935-c0ea-4701-a320-c17dd5ff9aeb" />
 
-<img width="552" height="308" alt="Screenshot 2025-11-09 at 22 38 24" src="https://github.com/user-attachments/assets/a2c8edd7-b3bd-4d04-944a-550750c12c6c" />
 
 We’ll simulate it with a special image that generates CPU load.
 
