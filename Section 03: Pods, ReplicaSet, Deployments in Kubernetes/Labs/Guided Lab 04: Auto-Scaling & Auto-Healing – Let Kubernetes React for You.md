@@ -46,7 +46,7 @@ Create a file:
 
 ```bash
 touch autohealing-deployment.yaml
-nano autohealing-deployment.yaml
+vi autohealing-deployment.yaml
 ```
 
 Paste this:
