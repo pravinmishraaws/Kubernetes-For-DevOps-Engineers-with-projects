@@ -145,6 +145,15 @@ spec:
               cpu: "100m"
 ```
 
+**How it works together:**
+- **requests** = guaranteed resource (used by scheduler to place pod)
+- **limits** = maximum allowed usage (enforced at runtime)
+
+**Example behavior:**
+- Pod can use CPU between 100m and 200m.
+- If node is under pressure, Kubernetes ensures pods at least get their requested CPU.
+- If pod tries to burst beyond 200m, it will be throttled.
+
 Apply it:
 
 ```bash
