@@ -1,45 +1,85 @@
-# Guided Lab 05 — Kubernetes Health Probes (Readiness & Liveness)
+# Guided Lab 05 — Kubernetes Health Probes (Readiness)
+
+> Scope: Only **readiness**. Default namespace. No Services yet. We’ll prove why readiness matters by watching how it **gates rollouts** and **Pod availability**—the practical “why” before we learn how traffic is routed.
+
+---
 
 ## 1) Introduction
 
-Deployments ensure Pods exist and roll out new versions safely. But Kubernetes still needs a way to answer two questions:
+### **You already have a running Deployment**
 
-1. **Can this Pod accept traffic right now?**
-   That’s **readiness**. If the readiness probe fails, the Pod is marked **not Ready**. It keeps running, but the control plane treats it as unavailable for work.
+You’ve defined:
 
-2. **Is this container stuck and should it be restarted?**
-   That’s **liveness**. If the liveness probe fails repeatedly, the kubelet **restarts** the container.
+* **Replicas:** 2 — Kubernetes keeps two Pods running.
+* **Resources:** `requests`/`limits` — each Pod gets fair CPU.
+* **RollingUpdate strategy** — safe, graceful upgrades.
 
-In this lab, you’ll add both probes to your existing NGINX Deployment, then trigger failures on purpose. You’ll watch how Kubernetes reflects those states and recovers.
+So far, so good. The Deployment looks clean.
+But here’s the big gap: **how does Kubernetes know when your container is actually *ready* to serve traffic?**
 
-**Let’s recap the goal before we begin:**
+---
 
-* Start from your last working Deployment (the one you shared).
-* Add a **readinessProbe** (HTTP GET `/`).
-* Add a **livenessProbe** (HTTP GET `/`).
-* Break each probe once to see what happens.
-* Fix it and confirm recovery.
+### **The Hidden Problem**
+
+“Running” is not the same as “Ready.”
+
+Imagine this:
+
+* The container process starts.
+* But NGINX is still booting, parsing config, warming cache, or waiting on a dependency.
+* If Kubernetes assumes “Pod is running ⇒ good to go,” users may hit **timeouts** or **errors**.
+
+We need a way to say: **“Don’t send me work until I’m truly ready.”**
+
+---
+
+### **What Readiness Probes Do**
+
+A **readinessProbe** tells Kubernetes exactly when a Pod can reliably take requests.
+
+* Until the probe **succeeds**, **Ready = False**.
+* During that time, the Pod **does not count** as available for rollouts and (later when we add Services) is **excluded** from endpoints.
+* When the probe **passes**, **Ready = True** and Kubernetes treats it as available.
+
+> In rolling updates, this prevents the platform from swapping out old, healthy Pods for new Pods that are still warming up.
+
+---
+
+### **A Quick Example**
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /
+    port: 80
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+* Wait 5s after container start.
+* Then hit `/` on port 80 every 10s.
+* Only after a 200 OK will Kubernetes mark the Pod **Ready**.
 
 ---
 
 ## 2) Step-by-Step Hands-On Setup
 
-We’ll keep your labs tidy in a dedicated folder, but we’ll work in the **default namespace**.
+We’ll keep files tidy in a dedicated folder, working in the **default namespace**.
 
 ```bash
 cd ~
-mkdir -p ~/k8s-labs/health-probes
-cd ~/k8s-labs/health-probes
+mkdir -p ~/k8s-labs/health-probes-readiness
+cd ~/k8s-labs/health-probes-readiness
 ```
 
-### 2.1 Save your last known good Deployment (baseline, no probes)
+### 2.1 Baseline Deployment (no probes)
 
 ```bash
 touch 00-nginx-deploy-baseline.yaml
 vi 00-nginx-deploy-baseline.yaml
 ```
 
-Paste the YAML you’re already using:
+Paste:
 
 ```yaml
 apiVersion: apps/v1
@@ -80,23 +120,23 @@ Apply and verify:
 ```bash
 kubectl apply -f 00-nginx-deploy-baseline.yaml
 kubectl rollout status deployment/nginx-deployment
-kubectl get pods -l app=nginx
-kubectl describe deployment nginx-deployment | sed -n '1,120p'
+kubectl get pods -l app=nginx -o wide
+kubectl describe deploy nginx-deployment | sed -n '1,120p'
 ```
 
-**What you did:** You re-applied the exact Deployment you’ve been using, so we have a consistent starting point without any probes.
+**Why this baseline?** It mirrors what you already have—**no probes yet**—so you can feel the difference once readiness is added.
 
-**Let’s recap:** We now have two replicas of NGINX running as before. Next, we’ll add probes to teach Kubernetes how to decide “ready” and “alive.”
+**Let’s recap:** Two NGINX Pods running, clean rollout config, no health checks beyond “process is running.”
 
 ---
 
-## 3) Add Readiness & Liveness Probes
+## 3) Add a Readiness Probe
 
-We’ll add both probes in a single change. For NGINX, an HTTP GET to `/` is simple and effective.
+Now we’ll teach Kubernetes when the Pod is **actually** ready.
 
 ```bash
-touch 01-nginx-deploy-with-probes.yaml
-vi 01-nginx-deploy-with-probes.yaml
+touch 01-nginx-deploy-readiness.yaml
+vi 01-nginx-deploy-readiness.yaml
 ```
 
 Paste:
@@ -128,26 +168,16 @@ spec:
           image: nginx:1.21.1
           ports:
             - containerPort: 80
-          # --- Probes we are adding now
           readinessProbe:
             httpGet:
               path: /
               port: 80
-            # Quick but not too aggressive: check every 5s, 1s timeout
+            # Tuning for quick feedback but avoiding false alarms
             initialDelaySeconds: 2
             periodSeconds: 5
             timeoutSeconds: 1
             failureThreshold: 3
             successThreshold: 1
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 80
-            # Give it a short grace period before first liveness check
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 1
-            failureThreshold: 3
           resources:
             requests:
               cpu: "100m"
@@ -155,45 +185,114 @@ spec:
               cpu: "200m"
 ```
 
-Apply and observe:
+Apply and watch:
 
 ```bash
-kubectl apply -f 01-nginx-deploy-with-probes.yaml
+kubectl apply -f 01-nginx-deploy-readiness.yaml
 kubectl rollout status deployment/nginx-deployment
 kubectl get pods -l app=nginx -w
 ```
 
-Describe one Pod to see probe sections and conditions:
+Inspect probe & conditions:
 
 ```bash
 POD=$(kubectl get pod -l app=nginx -o jsonpath='{.items[0].metadata.name}')
 kubectl describe pod "$POD" | sed -n '1,200p'
 ```
 
-**What those fields mean (at a glance):**
+**What changed:**
 
-* `readinessProbe`: Decides if a Pod is **Ready**. Failures mark it **not Ready** but do not restart the container.
-* `livenessProbe`: Decides if the container should be **restarted** after repeated failures.
-* `initialDelaySeconds`: Wait before the first check; useful to avoid false alarms right after start.
-* `periodSeconds`: How often to check.
-* `failureThreshold`: How many consecutive failures before taking action.
+* The Pod won’t be considered **Ready** until the probe passes.
+* With `maxUnavailable: 0`, rollouts require **a new Pod to be Ready** before an old Pod is removed—your “zero-downtime” safety net.
 
-**Let’s recap:** You added both probes. Kubernetes will now withhold “Ready” until `/` answers successfully and will restart containers if `/` keeps failing liveness.
+**Let’s recap:** Readiness is now a first-class signal. Kubernetes won’t count a Pod as available until `/` responds successfully.
 
 ---
 
-## 4) Verification — Make Readiness Fail, Then Fix It
+## 4) Feel Readiness by Breaking It (and Fixing It)
 
-To truly “feel” readiness, we’ll break it by pointing to a non-existent path. HTTP probes consider only **2xx/3xx** responses successful; a `404` fails.
+We’ll intentionally fail the probe by pointing it to a path that returns 404.
 
 ```bash
-cp 01-nginx-deploy-with-probes.yaml 02-nginx-readiness-broken.yaml
+cp 01-nginx-deploy-readiness.yaml 02-nginx-readiness-broken.yaml
 vi 02-nginx-readiness-broken.yaml
 ```
 
-Change only the readiness `path`:
+Change only the probe path:
 
 ```yaml
+          readinessProbe:
+            httpGet:
+              path: /does-not-exist   # break readiness on purpose
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
+            successThreshold: 1
+```
+
+Apply and observe:
+
+```bash
+kubectl apply -f 02-nginx-readiness-broken.yaml
+kubectl rollout status deployment/nginx-deployment --timeout=60s || true
+kubectl get pods -l app=nginx
+kubectl describe pod $(kubectl get pod -l app=nginx -o jsonpath='{.items[0].metadata.name}') | sed -n '1,200p'
+```
+
+**What you should see:**
+
+* Pod **Conditions** show **Ready: False**.
+* The Deployment can struggle to complete a rollout (since new Pods never become Ready).
+
+Now **fix** readiness:
+
+```bash
+cp 01-nginx-deploy-readiness.yaml 03-nginx-readiness-fixed.yaml
+kubectl apply -f 03-nginx-readiness-fixed.yaml
+kubectl rollout status deployment/nginx-deployment
+kubectl get pods -l app=nginx
+```
+
+**Let’s recap:** You saw Pods stay **NotReady** when the probe fails, and the rollout won’t fully complete. Restoring a good probe returns Pods to **Ready**, and the rollout finishes cleanly.
+
+---
+
+## 5) See How Readiness Gates Rolling Updates
+
+This is the real “why”: readiness prevents bad versions from replacing good ones.
+
+1. **Start from the fixed readiness spec**:
+
+```bash
+kubectl apply -f 03-nginx-readiness-fixed.yaml
+kubectl rollout status deployment/nginx-deployment
+kubectl get pods -l app=nginx
+```
+
+2. **Trigger an upgrade** to a new image (good case):
+
+```bash
+kubectl set image deploy/nginx-deployment nginx=nginx:1.21.2
+kubectl rollout status deploy/nginx-deployment
+kubectl get rs -l app=nginx
+kubectl get pods -l app=nginx -o wide
+```
+
+You’ll see a new ReplicaSet created; new Pods become **Ready**, then old Pods are scaled down—**no downtime**.
+
+3. **Rollback the image and break readiness** (to see rollout protection):
+
+```bash
+kubectl set image deploy/nginx-deployment nginx=nginx:1.21.3
+# Now make readiness fail on the template so new pods never become Ready
+cat > 04-readiness-broken-patch.yaml <<'EOF'
+spec:
+  template:
+    spec:
+      containers:
+        - name: nginx
           readinessProbe:
             httpGet:
               path: /does-not-exist
@@ -203,125 +302,60 @@ Change only the readiness `path`:
             timeoutSeconds: 1
             failureThreshold: 3
             successThreshold: 1
-```
+EOF
 
-Apply and watch:
-
-```bash
-kubectl apply -f 02-nginx-readiness-broken.yaml
-kubectl rollout status deployment/nginx-deployment
+kubectl patch deploy nginx-deployment --type merge --patch-file 04-readiness-broken-patch.yaml
+kubectl rollout status deploy/nginx-deployment --timeout=60s || true
 kubectl get pods -l app=nginx
-kubectl describe pod $(kubectl get pod -l app=nginx -o jsonpath='{.items[0].metadata.name}') | sed -n '1,200p'
+kubectl describe deploy nginx-deployment | sed -n '1,200p'
 ```
 
-What you’ll notice:
-
-* Pod(s) show **Ready: False** in the `Conditions`.
-* **Restart count stays the same**. Readiness does not restart containers.
-
-Now fix readiness:
+The rollout should **hang** or stay **in progress**, because new Pods never reach **Ready**.
+Fix it:
 
 ```bash
-cp 01-nginx-deploy-with-probes.yaml 03-nginx-readiness-fixed.yaml
 kubectl apply -f 03-nginx-readiness-fixed.yaml
-kubectl rollout status deployment/nginx-deployment
-kubectl get pods -l app=nginx
-kubectl describe pod $(kubectl get pod -l app=nginx -o jsonpath='{.items[0].metadata.name}') | sed -n '1,200p'
+kubectl rollout status deploy/nginx-deployment
 ```
 
-**Let’s recap what you saw:**
-
-* Breaking readiness made the Pod **not Ready** but didn’t kill it.
-* Fixing the probe returned the Pod to **Ready**.
-* This is exactly what you want during slow inits or dependencies not yet available: keep the Pod running, but don’t consider it ready.
+**Let’s recap:** Readiness + `maxUnavailable: 0` = safe rollouts. New Pods must prove they’re Ready before old Pods are retired.
 
 ---
 
-## 5) Verification — Make Liveness Fail, Then Fix It
+## 6) Practical Tuning Notes (just enough for now)
 
-Now we’ll prove that liveness actually **restarts** containers on persistent failure. An easy way is to point the liveness probe at the **wrong port**.
-
-```bash
-cp 03-nginx-readiness-fixed.yaml 04-nginx-liveness-broken.yaml
-vi 04-nginx-liveness-broken.yaml
-```
-
-Change only the liveness `port` from `80` to `81`:
-
-```yaml
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 81            # <-- wrong on purpose
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 1
-            failureThreshold: 3
-```
-
-Apply and watch:
-
-```bash
-kubectl apply -f 04-nginx-liveness-broken.yaml
-kubectl rollout status deployment/nginx-deployment
-kubectl get pods -l app=nginx -w
-```
-
-After ~30–40 seconds (initial delay + failures), you should see **RESTARTS** start to increment:
-
-```bash
-kubectl get pods -l app=nginx
-kubectl describe pod $(kubectl get pod -l app=nginx -o jsonpath='{.items[0].metadata.name}') | sed -n '1,200p'
-```
-
-Fix liveness:
-
-```bash
-cp 03-nginx-readiness-fixed.yaml 05-nginx-liveness-fixed.yaml
-kubectl apply -f 05-nginx-liveness-fixed.yaml
-kubectl rollout status deployment/nginx-deployment
-kubectl get pods -l app=nginx
-```
-
-**What just happened and why:**
-
-* Liveness failures tell the kubelet, “this container is unhealthy; restart it.”
-* By pointing to an invalid port, the probe failed consistently. After the threshold, Kubernetes restarted the container.
-* Restoring the correct port stopped the restarts.
-
-**Let’s recap:** Readiness affects **availability** (Ready/NotReady). Liveness affects **survivability** (Restart on failure). You’ve seen both in action.
-
----
-
-## 6) Quick Tuning Guidance (just enough for now)
-
-* **Start simple**: For web apps, check `/` or a lightweight `/health` endpoint.
-* **Make readiness strict, liveness conservative**: Prefer catching transient issues in readiness. Let liveness act only when the container is truly in a bad state.
-* **Use small timeouts**: Probes run often; keep them cheap (e.g., `timeoutSeconds: 1`).
-* **Give liveness a short initial delay**: Avoid restarts during the first few seconds of startup.
+* **HTTP GET to a lightweight path** (`/healthz` or `/`) is perfect for web apps.
+* **`initialDelaySeconds`** covers startup warmup; **don’t** make it so long that you hide real issues.
+* **`periodSeconds`/`timeoutSeconds`**: keep checks cheap and frequent; `1s` timeouts are common.
+* **`failureThreshold`**: small numbers fail fast; larger values give apps a chance to recover during brief hiccups.
+* **Rollouts**: with `maxUnavailable: 0`, readiness directly enforces zero-downtime behavior.
 
 ---
 
 ## 7) Clean Up (optional)
 
-If you want to remove the resources created in this lab:
-
 ```bash
-kubectl delete deployment nginx-deployment
+# Keep it for the next lab, or remove it now:
+# kubectl delete deploy nginx-deployment
 ```
-
-(We stayed in the default namespace; nothing else to clean.)
 
 ---
 
-## Wrap-Up: What Did You Learn?
+## Wrap-Up — What Did You Learn?
 
-* **Readiness Probe** answers: *Can this Pod serve?*
-  Failure → Pod marked **not Ready**, but it **keeps running**.
+* **Readiness** answers: *“Can this Pod reliably take requests?”*
+  Until it’s true, **Ready = False**.
 
-* **Liveness Probe** answers: *Should this container be restarted?*
-  Failure (over time) → **kubelet restarts** the container.
+* With readiness in place, Kubernetes:
 
-* You applied both probes to your existing Deployment, **broke each deliberately**, and observed the expected behaviors—**not Ready** without restarts for readiness failures, and **restarts** for liveness failures.
+  * **Excludes** NotReady Pods from availability (and later from Service endpoints).
+  * **Protects** rolling updates—new Pods must become Ready before old Pods are removed (thanks to `maxUnavailable: 0`).
 
-* You tuned only a few core fields (`initialDelaySeconds`, `periodSeconds`, `timeoutSeconds`, `failureThreshold`) and stayed within concepts already covered.
+* You:
+
+  * Added a readiness probe.
+  * Broke it to see **NotReady** behavior and rollout stalling.
+  * Fixed it to complete the rollout cleanly.
+  * Learned sane defaults and what each knob does.
+
+**Next:** when we understand health probes **Liveness**. 
