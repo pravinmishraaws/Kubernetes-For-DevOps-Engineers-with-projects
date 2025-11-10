@@ -1,36 +1,56 @@
-# Guided Lab 06 — Kubernetes Services (ClusterIP)
+# Guided Lab 07 — Kubernetes Services (ClusterIP)
 
-## 1) Introduction — Why Services?
-
-Your Deployments keep Pods alive and roll out new versions safely. Health probes tell Kubernetes whether a Pod can serve and whether it should be restarted. **But how do other Pods actually find and talk to your app when Pod IPs keep changing?**
-
-That’s the problem Services solve.
-
-### What is a Service?
-
-A **Service** is a stable front door for a set of Pods:
-
-* It has a **stable virtual IP (ClusterIP)** and a **stable DNS name**.
-* It uses a **label selector** to pick which Pods are “behind” it.
-* It **load-balances** traffic across those selected Pods.
-
-### How does it work (behind the scenes)?
-
-* **You** create a Service with a selector (e.g., `app: nginx`).
-* The **Service controller** creates/maintains **EndpointSlices** that list the matching Pods’ IPs and ports, including their **Ready** condition (from readiness probes).
-* **kube-proxy** on each node programs the OS (iptables/ipvs) so that packets to the Service’s virtual IP get **distributed** to the backing Pod IPs.
-* **CoreDNS** gives you a stable **DNS name** for the Service:
-  `nginx-svc.default.svc.cluster.local` (and the short form `nginx-svc` from the same namespace).
-
-### Why start with ClusterIP?
-
-**ClusterIP** is the default Service type—reachable **only inside** the cluster. It’s what your microservices use to talk to each other. We’ll prove it end-to-end, and we’ll also show how selectors, readiness, and endpoints tie together.
+> Scope: **ClusterIP** only. Default namespace. We’ll connect the dots between “healthy Pods” and “how anything actually reaches them,” then prove it end-to-end with hands-on drills.
 
 ---
 
-## 2) Step-by-Step Hands-On Setup (ClusterIP)
+## 1) Introduction — You’ve Built a Smart, Reliable Deployment… Now Who Finds It?
 
-We’ll keep files tidy in a new folder but stay in the **default namespace**.
+You’ve already done a lot right:
+
+* **Replicas (2):** Kubernetes keeps two Pods alive.
+* **Resources:** Requests/limits prevent CPU starvation.
+* **Rolling updates:** No downtime during upgrades.
+* **Readiness:** New Pods don’t receive traffic until they’re ready.
+* **Liveness:** Wedged processes self-heal via restarts.
+
+That’s an excellent foundation. But there’s a practical snag that appears the moment **another Pod** tries to talk to your app:
+
+### The Real-World Problem
+
+* **Pod IPs are ephemeral.** Scale up? Roll out? Crash/restart? Pod IPs **change**.
+* A teammate hard-codes a Pod IP to test something… ten minutes later it breaks.
+* Your system works in isolation, but **service-to-service communication** is flaky or manual.
+
+We need a stable way to **find** and **reach** the right Pods—only those that are **Ready**—no matter how often they churn.
+
+### The Concept — What a Service Is (Practically)
+
+A **Service** is a *stable front door* for a set of Pods:
+
+* It owns a **stable virtual IP** (the *ClusterIP*) and a **stable DNS name**.
+* It uses a **label selector** (e.g., `app: nginx`) to decide which Pods sit behind the door.
+* It **load-balances** across *Ready* endpoints, so callers don’t need to care which specific Pod serves them.
+
+You’ll create one object—**a Service**—and every Pod in your namespace can reach your app at a single, unchanging name, e.g. `http://nginx-svc`.
+
+### How It Works (Just Enough Detail)
+
+* You define the Service with a **selector**.
+* Kubernetes maintains **EndpointSlices** (lists of Pod IP:Port) that match the selector and reflect each Pod’s **Ready** state.
+* **kube-proxy** on each node programs the data path (iptables/ipvs) so traffic to the Service’s **ClusterIP** is distributed to the backend Pod IPs.
+* **CoreDNS** gives your Service a DNS name:
+  `nginx-svc.default.svc.cluster.local` (and the short `nginx-svc` from the same namespace).
+
+### Why Start with ClusterIP?
+
+It’s the default type—**internal-only**. Exactly what your microservices use to talk to each other inside the cluster. We’ll prove discovery, DNS, and readiness-aware routing in a tight loop.
+
+---
+
+## 2) Step-by-Step Hands-On (ClusterIP)
+
+We’ll keep files tidy but stay in the **default namespace**.
 
 ```bash
 cd ~
@@ -38,9 +58,9 @@ mkdir -p ~/k8s-labs/services/clusterip
 cd ~/k8s-labs/services/clusterip
 ```
 
-### 2.1 Reuse your Deployment (with probes)
+### 2.1 Reuse Your Deployment (probes included)
 
-> If your Deployment is already running from the previous lab, you can still re-apply for consistency.
+> If it’s already applied from previous labs, re-applying won’t hurt—this keeps everyone aligned.
 
 ```bash
 touch 00-nginx-deploy.yaml
@@ -99,7 +119,7 @@ spec:
               cpu: "200m"
 ```
 
-Apply and verify:
+Apply and check:
 
 ```bash
 kubectl apply -f 00-nginx-deploy.yaml
@@ -107,9 +127,9 @@ kubectl rollout status deploy/nginx-deployment
 kubectl get pods -l app=nginx -o wide
 ```
 
-**What we did & why:** We stood up two healthy NGINX Pods. Readiness ensures only serving Pods are considered “Ready”—that becomes important when Services decide where to send traffic.
+**Why this matters:** Labels (`app: nginx`) on the Pod template are the “hook” your Service will use. Readiness ensures only good Pods are considered *Ready*.
 
-**Quick recap:** Two Pods are up, labeled `app=nginx`, and listening on port 80. Perfect candidates for a Service.
+**Let’s recap:** Two healthy Pods with stable labels, listening on port 80. Perfect backends for a Service.
 
 ---
 
@@ -129,12 +149,12 @@ metadata:
   name: nginx-svc
 spec:
   selector:
-    app: nginx            # <- matches the Pods from the Deployment
+    app: nginx
   ports:
     - name: http
-      port: 80            # <- Service's stable virtual port
-      targetPort: 80      # <- containerPort on the Pod
-  type: ClusterIP         # <- default; internal-only access
+      port: 80         # Service's stable, virtual port
+      targetPort: 80   # Pod containerPort
+  type: ClusterIP      # internal-only
 ```
 
 Apply and inspect:
@@ -147,62 +167,54 @@ kubectl describe endpoints nginx-svc | sed -n '1,200p'
 kubectl get endpointslice -l kubernetes.io/service-name=nginx-svc
 ```
 
-**What each field means:**
+**What you’re seeing:**
 
-* `selector`: This is the glue—only Pods with `app: nginx` are candidates.
-* `ports.port`: The port your **clients** use when they talk to the Service.
-* `ports.targetPort`: The port on the **container** that actually handles the traffic.
-* `type: ClusterIP`: Kubernetes allocates a **virtual IP** inside the cluster (see `CLUSTER-IP` in `kubectl get svc`).
+* `CLUSTER-IP` — the Service’s virtual IP.
+* `Endpoints` / `EndpointSlices` — the current list of matching Pod IPs and ports (and their **Ready** state).
 
-**How readiness shows up here:**
-In `Endpoints`/`EndpointSlices`, each Pod IP has a **ready** condition. Kube-proxy will not route traffic to endpoints that aren’t Ready—so your readiness probe directly affects traffic.
-
-**Let’s recap:** The Service now has a stable IP and DNS name, and it knows which Pods to send traffic to via the selector. You can see the backend Pod IPs in `endpoints`.
+**Let’s recap:** You now have a *single* front door (`nginx-svc`) that Kubernetes keeps pointing at the right Pods as they come and go.
 
 ---
 
-### 2.3 Call the Service from inside the cluster
+### 2.3 Call the Service from Inside the Cluster
 
-We’ll use a tiny one-off BusyBox Pod as a client.
+Spin up a tiny client Pod and make requests by **name** and by **ClusterIP**.
 
 ```bash
 kubectl run tester --image=busybox:1.36 --restart=Never --command -- sh -c "sleep 3600"
 kubectl get pod tester
 ```
 
-Call the Service **by name** and **by ClusterIP**:
+Now test:
 
 ```bash
-# By DNS name (short form works inside the same namespace)
+# By DNS name (short form, same namespace)
 kubectl exec -it tester -- sh -c "wget -qO- http://nginx-svc | head -n 5"
 
-# By ClusterIP (replace the IP you saw in 'kubectl get svc')
+# By ClusterIP (replace with the IP shown in 'kubectl get svc')
 kubectl exec -it tester -- sh -c "wget -qO- http://<CLUSTER_IP> | head -n 5"
 
-# Resolve DNS for the Service (BusyBox has nslookup)
+# DNS lookups via CoreDNS
 kubectl exec -it tester -- nslookup nginx-svc
 kubectl exec -it tester -- nslookup nginx-svc.default.svc.cluster.local
 ```
 
-**What’s happening:**
+**Why this proves the point:** Your client doesn’t care which Pod serves the request—only that `nginx-svc` is stable. Kubernetes does the rest.
 
-* DNS `nginx-svc` resolves to the Service’s ClusterIP.
-* Requests to that IP/port are distributed to the Ready Pod IPs listed in the Endpoints/EndpointSlices.
-
-**Let’s recap:** You reached your app using the **Service name**—no Pod IPs required. That’s the day-to-day developer experience inside Kubernetes.
+**Let’s recap:** You’ve consumed your app exactly how other services will—by name, not by Pod IP.
 
 ---
 
-### 2.4 Prove selectors matter (break, observe, fix)
+### 2.4 Show the Label/Selector Contract (Break → Observe → Fix)
 
-Now, temporarily break the selector so it matches **no** Pods.
+If the selector doesn’t match labels, the Service has nowhere to send traffic.
 
 ```bash
 cp 01-nginx-svc-clusterip.yaml 02-nginx-svc-selector-broken.yaml
 vi 02-nginx-svc-selector-broken.yaml
 ```
 
-Change the selector:
+Change:
 
 ```yaml
 spec:
@@ -210,7 +222,7 @@ spec:
     app: does-not-match
 ```
 
-Apply and check endpoints:
+Apply and check:
 
 ```bash
 kubectl apply -f 02-nginx-svc-selector-broken.yaml
@@ -218,7 +230,7 @@ kubectl get endpoints nginx-svc -o wide
 kubectl describe endpoints nginx-svc | sed -n '1,200p'
 ```
 
-You should see **no addresses**. Try to call the Service:
+Try to call it:
 
 ```bash
 kubectl exec -it tester -- sh -c "wget -S -O- http://nginx-svc 2>&1 | head -n 20"
@@ -232,17 +244,15 @@ kubectl get endpoints nginx-svc -o wide
 kubectl exec -it tester -- sh -c "wget -qO- http://nginx-svc | head -n 5"
 ```
 
-**Why we did this:** Services are dumb without selectors. No label match → no endpoints → nowhere to send traffic.
-
-**Let’s recap:** The **label/selector contract** is fundamental. Your Deployment sets labels on Pods; your Service selects by those labels.
+**Let’s recap:** Services are simple but strict—**no label match, no endpoints**. Your Deployment owns labels; your Service selects them.
 
 ---
 
-### 2.5 See readiness influence (quick drill)
+### 2.5 See Readiness Influence on Routing (Quick Drill)
 
-Make one Pod temporarily **Not Ready** by changing readiness to a bad path and rolling only one replica—then restore it. This shows how “Not Ready” removes a Pod from traffic.
+We’ll momentarily break readiness so a Pod is **NotReady**, and then observe how the Service reflects that.
 
-1. Patch Deployment to 1 replica (keeps output compact):
+1. Keep things concise by scaling to one replica:
 
 ```bash
 kubectl scale deploy/nginx-deployment --replicas=1
@@ -250,13 +260,13 @@ kubectl rollout status deploy/nginx-deployment
 kubectl get pods -l app=nginx -o wide
 ```
 
-2. Break readiness **briefly** (bad path), apply, observe `Ready=False`, then fix:
+2. Patch readiness to a bad path → watch it fall out of rotation:
 
 ```bash
-# Save current spec
+# Save current spec (for easy restore)
 kubectl get deploy nginx-deployment -o yaml > 03-deploy-backup.yaml
 
-# Create a quick patch file
+# Create a patch that breaks readiness
 cat > 03-readiness-broken.yaml <<'EOF'
 spec:
   template:
@@ -278,11 +288,11 @@ kubectl rollout status deploy/nginx-deployment
 kubectl get pods -l app=nginx
 kubectl describe pod $(kubectl get pod -l app=nginx -o jsonpath='{.items[0].metadata.name}') | sed -n '1,160p'
 
-# Check endpoints (pod should be marked not ready and excluded from routing)
+# Endpoints should now exclude this Pod (NotReady)
 kubectl describe endpoints nginx-svc | sed -n '1,200p'
 ```
 
-3. Restore the original deployment:
+3. Restore readiness:
 
 ```bash
 kubectl apply -f 00-nginx-deploy.yaml
@@ -290,42 +300,51 @@ kubectl rollout status deploy/nginx-deployment
 kubectl describe endpoints nginx-svc | sed -n '1,200p'
 ```
 
-**What you observed:** When readiness failed, the Pod stayed running but stopped being considered Ready for the Service. Restoring readiness put it back into rotation.
+**What you learned:** Readiness isn’t academic—Services **respect** it. NotReady Pods don’t receive traffic.
 
-**Let’s recap:** Readiness gates **traffic**; Services use that signal to avoid sending requests to Pods that aren’t ready.
+**Let’s recap:** Readiness gates traffic; the Service’s endpoint list mirrors that truth in real time.
 
 ---
 
 ## 3) Verification & Troubleshooting
 
-* **`kubectl get endpoints nginx-svc` is empty**
-  Likely a selector/label mismatch. Check:
+* **Endpoints empty?**
+  Selector mismatch or no Ready Pods.
 
   ```bash
   kubectl get pods -l app=nginx -o wide
   kubectl describe svc nginx-svc | sed -n '1,160p'
+  kubectl describe endpoints nginx-svc | sed -n '1,200p'
   ```
-* **Service exists, endpoints exist, but calls fail**
 
-  * The Pod might not be Ready yet (check `kubectl describe pod …` conditions).
-  * The container might not be listening on `targetPort` (ensure `containerPort: 80` and `targetPort: 80` align).
-* **DNS name doesn’t resolve inside cluster**
-  Ensure CoreDNS is healthy:
+* **Service exists, but requests fail intermittently**
+
+  * Pod might be flapping on readiness—check `Conditions` and `RESTARTS`:
+
+    ```bash
+    kubectl describe pod $(kubectl get pod -l app=nginx -o jsonpath='{.items[0].metadata.name}') | sed -n '1,200p'
+    kubectl get pods -l app=nginx
+    ```
+  * Ensure `targetPort` matches `containerPort`.
+
+* **DNS doesn’t resolve**
+  Verify CoreDNS:
 
   ```bash
   kubectl -n kube-system get pods -l k8s-app=kube-dns
   ```
-* **BusyBox lacks a tool**
-  Use `wget -qO-` for HTTP, and `nslookup` for DNS. If you need `curl` or `dig`, run a different image (e.g., `curlimages/curl:8.7.1`).
+
+* **BusyBox limitations**
+  Use `wget` and `nslookup`. If you need `curl`/`dig`, run a different toolbox image (e.g., `curlimages/curl`).
 
 ---
 
 ## 4) Clean Up (optional)
 
 ```bash
-kubectl delete svc nginx-svc
 kubectl delete pod tester
-# leave the Deployment for the next lab, or delete it too:
+kubectl delete svc nginx-svc
+# Keep the Deployment for the next lab (NodePort), or remove it:
 # kubectl delete deploy nginx-deployment
 ```
 
@@ -333,15 +352,15 @@ kubectl delete pod tester
 
 ## Wrap-Up — What Did You Learn?
 
-* **ClusterIP** gives your app a **stable, internal-only** virtual IP and DNS name.
-* A Service **selects** Pods via labels and **load-balances** to **Ready** endpoints.
-* **EndpointSlices** track which Pod IPs are behind the Service (and their readiness); **kube-proxy** handles the actual traffic steering.
+* **ClusterIP** gives your app a **stable, internal** IP and DNS name—no more chasing Pod IPs.
+* **Selectors** connect Services to Pods; **labels** make the contract explicit.
+* **EndpointSlices + kube-proxy** steer traffic only to **Ready** Pods.
 * You proved the full path:
 
-  * Deployed Pods with probes
+  * Reused a healthy Deployment with probes
   * Created a ClusterIP Service
-  * Resolved and called it by name/IP from a client Pod
+  * Reached it by DNS and IP from a client Pod
   * Broke and fixed the selector
-  * Saw readiness control which Pods receive traffic
+  * Saw readiness immediately reflected in Service endpoints
 
-Next, we’ll create a **NodePort** Service to make the same app reachable from **outside** the cluster—still using the exact Deployment you already understand.
+**Next up:** we’ll expose the same app **outside** the cluster with **NodePort**—same labels, same Pods, just a different door.
