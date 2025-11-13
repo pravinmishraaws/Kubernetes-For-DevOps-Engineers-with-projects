@@ -31,8 +31,8 @@ Imagine this:
 
 We need a way to say: **“Don’t send me work until I’m truly ready.”**
 
-> Readiness Probe: Determines if a container is ready to accept traffic.
-> Liveness Probe: Checks if a container is still running correctly. If it fails, the container is restarted. 
+> Readiness Probe: Determines if a container is ready to accept traffic.  
+> Liveness Probe: Checks if a container is still running correctly. If it fails, the container is restarted.   
 > Startup Probe: Verifies that the application within a container has started successfully.
 
 ---
