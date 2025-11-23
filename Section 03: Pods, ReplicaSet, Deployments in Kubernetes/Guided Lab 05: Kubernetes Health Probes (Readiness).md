@@ -11,8 +11,8 @@
 You’ve defined:
 
 * **Replicas:** 2 — Kubernetes keeps two Pods running.
-* **Resources:** `requests`/`limits` — each Pod gets fair CPU.
 * **RollingUpdate strategy** — safe, graceful upgrades.
+* **HPA (Auto Scaling):** `requests`/`limits` — each Pod gets fair CPU.
 
 So far, so good. The Deployment looks clean.
 But here’s the big gap: **how does Kubernetes know when your container is actually *ready* to serve traffic?**
