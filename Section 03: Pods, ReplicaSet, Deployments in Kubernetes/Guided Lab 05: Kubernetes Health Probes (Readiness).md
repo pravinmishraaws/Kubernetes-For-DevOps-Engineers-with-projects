@@ -16,7 +16,8 @@ You’ve defined:
 
 So far, so good. The Deployment looks clean.
 
-<img width="1440" height="674" alt="Screenshot 2025-11-23 at 10 46 51" src="https://github.com/user-attachments/assets/216f7317-0221-4277-b21a-d6f8bd1b7b02" />
+<img width="1438" height="659" alt="Screenshot 2025-11-23 at 10 48 43" src="https://github.com/user-attachments/assets/0dcb7151-d0f7-4f79-8985-623ab1955adf" />
+
 
 But here’s the big gap: **how does Kubernetes know when your container is actually *ready* to serve traffic?**
 
