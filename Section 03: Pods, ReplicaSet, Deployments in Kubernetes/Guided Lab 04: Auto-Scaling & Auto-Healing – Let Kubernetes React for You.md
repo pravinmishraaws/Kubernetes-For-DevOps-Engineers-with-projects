@@ -156,6 +156,8 @@ spec:
 
 **How it works together:**
 - **requests** = guaranteed resource (used by scheduler to place pod)
+               = 100 millicores of CPU.
+               = 100m = 0.1 CPU core
 - **limits** = maximum allowed usage (enforced at runtime)
 
 **Example behavior:**
