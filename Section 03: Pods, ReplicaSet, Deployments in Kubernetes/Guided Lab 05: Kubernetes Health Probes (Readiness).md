@@ -15,6 +15,9 @@ You’ve defined:
 * **HPA (Auto Scaling):** `requests`/`limits` — each Pod gets fair CPU.
 
 So far, so good. The Deployment looks clean.
+
+<img width="1440" height="674" alt="Screenshot 2025-11-23 at 10 46 51" src="https://github.com/user-attachments/assets/216f7317-0221-4277-b21a-d6f8bd1b7b02" />
+
 But here’s the big gap: **how does Kubernetes know when your container is actually *ready* to serve traffic?**
 
 ---
